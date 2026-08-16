@@ -36,6 +36,12 @@
     "build:linux": "./build-linux.sh",
     "build:windows": "pwsh build-windows.ps1"
   },
+  "optionalDependencies": {
+    "bun-webgpu-darwin-arm64": "^0.1.7",
+    "bun-webgpu-darwin-x64": "^0.1.7",
+    "bun-webgpu-linux-x64": "^0.1.7",
+    "bun-webgpu-win32-x64": "^0.1.7"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@webgpu/types": "^0.1.60",

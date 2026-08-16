@@ -67,6 +67,22 @@ export function normalizeIdentifier(input: string): string {
 
 export function decodeCallbackMessage(messagePtr: Pointer | null, messageSize?: number | bigint): string {
     if (!messagePtr || messageSize === 0n || messageSize === 0) {
+        // Windows x64 passes a by-value WGPUStringView BY REFERENCE (structs over 8 bytes), so
+        // the callback's declared (pointer, u64) pair actually receives a pointer to
+        // { data: ptr, length: u64 } and a shifted (null) size argument. Recover the real view
+        // instead of reporting every Dawn diagnostic as empty.
+        if (messagePtr && process.platform === 'win32') {
+            try {
+                const view = new DataView(toArrayBuffer(messagePtr, 0, 16));
+                const data = view.getBigUint64(0, true);
+                const length = view.getBigUint64(8, true);
+                if (data !== 0n && length > 0n && length < 1048576n) {
+                    return Buffer.from(toArrayBuffer(Number(data), 0, Number(length))).toString();
+                }
+            } catch {
+                // unreadable memory: fall through to the empty-message report
+            }
+        }
         return '[empty message]';
     }
 

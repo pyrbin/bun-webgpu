@@ -789,12 +789,13 @@ export const WGPUBindGroupLayoutEntryStruct = defineStruct([
     ['nextInChain', 'pointer', { optional: true }],
     ['binding', 'u32'],
     ['visibility', 'u64'],
-    // Weird
-    // With some builds this is needed, but others not, unclear when and why.
-    // Need to check the gcc/g++ versions and what causes the mismatch.
-    // Interestingly, it works with either u32 or u64.
-    // it then fails with: "Error: Unexpected validation error occurred: BindGroupLayoutEntry had none of buffer, sampler, texture, storageTexture, or externalTexture set"
-    ['_alignment0', 'u32', { default: 0, condition: () => process.platform !== 'win32' }],
+    // Dawn's webgpu.h declares `uint32_t bindingArraySize` between visibility and buffer
+    // (bind-group arrays). Omitting it shifts every union member 8 bytes early (4 for the field,
+    // 4 more from buffer's 8-byte re-alignment) and Dawn then fails createBindGroupLayout with
+    // "BindGroupLayoutEntry had none of buffer, sampler, texture, storageTexture, or
+    // externalTexture set". It is part of the C struct on every platform — the previous
+    // platform-conditional pad broke all explicit bind group layouts on win32.
+    ['bindingArraySize', 'u32', { default: 0 }],
     ['buffer', WGPUBufferBindingLayoutStruct, { optional: true }],
     ['sampler', WGPUSamplerBindingLayoutStruct, { optional: true }],
     ['texture', WGPUTextureBindingLayoutStruct, { optional: true }],
