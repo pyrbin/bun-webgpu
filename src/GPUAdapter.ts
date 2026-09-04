@@ -20,6 +20,7 @@ import {
   DEFAULT_SUPPORTED_LIMITS,
   GPUSupportedLimitsImpl,
   decodeCallbackMessage,
+  retain,
 } from "./shared.js"
 
 const RequestDeviceStatus = {
@@ -234,6 +235,10 @@ export class GPUAdapterImpl implements GPUAdapter {
 
       try {
         // --- 1. Pack Descriptor ---
+        // Both of the callbacks below live as long as the DEVICE does — Dawn calls them from its
+        // event pump whenever an error or a loss lands — so both are retained: a `const` in this
+        // executor is unreachable the moment `requestDevice` returns, and a collected wrapper frees
+        // the trampoline's page exactly as `close()` would.
         const uncapturedErrorCallback = new JSCallback(
           (
             devicePtr: Pointer,
@@ -256,6 +261,7 @@ export class GPUAdapterImpl implements GPUAdapter {
         if (!uncapturedErrorCallback.ptr) {
           fatalError("Failed to create uncapturedErrorCallback")
         }
+        retain(uncapturedErrorCallback)
 
         const deviceLostCallback = new JSCallback(
           (
@@ -277,6 +283,7 @@ export class GPUAdapterImpl implements GPUAdapter {
         if (!deviceLostCallback.ptr) {
           fatalError("Failed to create deviceLostCallback")
         }
+        retain(deviceLostCallback)
 
         const fullDescriptor: GPUDeviceDescriptor & {
           uncapturedErrorCallbackInfo: WGPUUncapturedErrorCallbackInfo
@@ -343,20 +350,17 @@ export class GPUAdapterImpl implements GPUAdapter {
             let statusName = ReverseDeviceStatus[status] || "Unknown WGPU Error"
             reject(new OperationError(`WGPU Error (${statusName}): ${message || "No message provided."}`))
           }
-
-          if (jsCallback) {
-            const callbackToClose = jsCallback
-            jsCallback = null
-            queueMicrotask(() => {
-              callbackToClose.close()
-            })
-          }
         }
 
-        jsCallback = new JSCallback(callbackFn, {
-          args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
-          returns: FFIType.void,
-        })
+        // Neither closed nor dropped, for the reason the pair above is retained: the instance keeps
+        // every one of these pointers for as long as it may still deliver through them, and a page
+        // freed either way is the one its own event pump then jumps into.
+        jsCallback = retain(
+          new JSCallback(callbackFn, {
+            args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
+            returns: FFIType.void,
+          }),
+        )
 
         if (!jsCallback?.ptr) {
           fatalError("Failed to create JSCallback")
@@ -380,7 +384,6 @@ export class GPUAdapterImpl implements GPUAdapter {
       } catch (e) {
         console.error("Error during requestDevice:", e)
         this._state = "valid"
-        if (jsCallback) jsCallback.close()
         reject(e)
       }
     })

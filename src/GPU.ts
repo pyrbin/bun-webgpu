@@ -7,7 +7,7 @@ import {
   WGPURequestAdapterOptionsStruct,
   WGPUSupportedWGSLLanguageFeaturesStruct,
 } from "./structs_def.js";
-import { decodeCallbackMessage } from "./shared.js";
+import { decodeCallbackMessage, retain } from "./shared.js";
 import { fatalError } from "./utils/error.js";
 import { allocStruct } from "./structs_ffi.js";
 
@@ -125,7 +125,7 @@ export class GPUImpl implements GPU {
     return new Promise((resolve, reject) => {
         let packedOptionsPtr: Pointer | null = null;
         let jsCallback: JSCallback | null = null;
-        
+
         try {
             if (options) {
                 try {
@@ -154,19 +154,16 @@ export class GPUImpl implements GPU {
                     let statusName = Object.keys(RequestAdapterStatus).find(key => RequestAdapterStatus[key as keyof typeof RequestAdapterStatus] === status) || 'Unknown WGPU Error';
                     reject(new Error(`WGPU Error (${statusName}): ${message || 'No message provided.'}`));
                 }
-
-                if (jsCallback) {
-                    const callbackToClose = jsCallback;
-                    jsCallback = null;
-                    queueMicrotask(() => {
-                        callbackToClose.close();
-                    });
-                }
             };
 
-            jsCallback = new JSCallback(callbackFn, { 
-              args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer ], returns: FFIType.void 
-            });
+            // The trampoline is never closed and never dropped: the instance may still hold this
+            // pointer in an event it has not retired, and freeing the page — by `close()` or by
+            // letting the wrapper be collected — is the page the next wgpuInstanceProcessEvents
+            // jumps into. `retain` is what makes the second half of that a property of the code.
+            // One adapter request per process holds one trampoline; that is the trade.
+            jsCallback = retain(new JSCallback(callbackFn, {
+              args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer ], returns: FFIType.void
+            }));
 
             if (!jsCallback?.ptr) {
                 fatalError("Failed to create JSCallback");
@@ -189,7 +186,6 @@ export class GPUImpl implements GPU {
             );
             this._ticker.register();
         } catch (e) {
-            if (jsCallback) jsCallback.close();
             reject(e);
         }
     });

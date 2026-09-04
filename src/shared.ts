@@ -1,5 +1,23 @@
-import { type Pointer, toArrayBuffer } from "bun:ffi";
+import { JSCallback, type Pointer, toArrayBuffer } from "bun:ffi";
 import { BufferPool, type BlockBuffer } from "./buffer_pool.js";
+
+// Every FFI trampoline this binding ever builds, held for the process's life. Nothing here is a
+// cache and nothing is ever read back: the array IS the reference that keeps the wrapper — and the
+// page bun put its trampoline on — alive. Dawn holds a callback's `.ptr` for as long as it may
+// still deliver through it, and a collected `JSCallback` frees that page exactly as `close()` does,
+// so a device-lost or uncaptured-error callback dropped by GC is the same use-after-free the closes
+// were, only timed by the collector instead of by a destroy. Retaining makes "never freed" an
+// invariant of this code rather than of bun's GC. The cost is ~26 KB per trampoline, never
+// reclaimed: one per adapter request, per device request, per queue, and one per buffer that
+// actually maps — against a process that ends.
+const retained: JSCallback[] = [];
+
+/** hold `callback` for the process's life and hand it back — every `new JSCallback` in this binding
+ *  goes through here, because a trampoline the driver may still call must never be freed. */
+export function retain<T extends JSCallback>(callback: T): T {
+    retained.push(callback);
+    return callback;
+}
 
 export const AsyncStatus = {
     Success: 1,
@@ -21,6 +39,8 @@ export const WGPUErrorType = {
 
 const idBufferPool = new BufferPool(64, 1024, 8);
 
+/** claim an 8-byte block carrying `id` and its own index — pass its pointer as a callback's
+ *  userdata and read it back with {@link unpackUserDataId}. */
 export function packUserDataId(id: number): ArrayBuffer {
     const blockBuffer = idBufferPool.request();
     const userDataBuffer = new Uint32Array(blockBuffer.buffer);
@@ -29,13 +49,29 @@ export function packUserDataId(id: number): ArrayBuffer {
     return blockBuffer.buffer;
 }
 
+/** read a userdata id back and return its block to the pool, or `-1` when the pointer names no
+ *  block this pool still has out. NEVER throws: it runs inside an FFI callback, where a throw
+ *  leaves the native caller mid-flight and the JS side half-updated — the shape that made a
+ *  mis-shifted win32 argument read as "Block was not allocated or already freed" from inside
+ *  `wgpuInstanceProcessEvents`. */
 export function unpackUserDataId(userDataPtr: Pointer): number {
-    const userDataBuffer = toArrayBuffer(userDataPtr, 0, 8);
-    const userDataView = new Uint32Array(userDataBuffer);
-    const id = userDataView[0];
-    const index = userDataView[1];
-    idBufferPool.releaseBlock(index!);
-    return id!;
+    if (!userDataPtr) return -1;
+    let id: number;
+    let index: number;
+    // The catch covers only what `toArrayBuffer` REFUSES — a pointer bun will not wrap. It is not a
+    // validity test: a wrong but mapped address reads two words of garbage and returns them, and an
+    // unmapped one faults the process rather than throwing. `owns(index)` below is the real guard,
+    // and the only reason a garbage read is survivable.
+    try {
+        const view = new Uint32Array(toArrayBuffer(userDataPtr, 0, 8));
+        id = view[0]!;
+        index = view[1]!;
+    } catch {
+        return -1;
+    }
+    if (!idBufferPool.owns(index)) return -1;
+    idBufferPool.releaseBlock(index);
+    return id;
 }
 
 export class GPUAdapterInfoImpl implements GPUAdapterInfo {

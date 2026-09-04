@@ -10,6 +10,7 @@ import {
     WGPUTexelCopyTextureInfoStruct
 } from "./structs_def.js";
 import { InstanceTicker } from "./GPU.js";
+import { retain } from "./shared.js";
 
 // Type alias for buffer sources compatible with bun:ffi ptr()
 export type PtrSource = ArrayBuffer | ArrayBufferView;
@@ -29,7 +30,10 @@ export class GPUQueueImpl implements GPUQueue {
     private _onSubmittedWorkDoneRejects: ((reason?: any) => void)[] = [];
     
     constructor(public readonly ptr: Pointer, private lib: FFISymbols, private instanceTicker: InstanceTicker) {
-        this._onSubmittedWorkDoneCallback = new JSCallback(
+        // Retained for the process's life: the queue hands this pointer to Dawn on every
+        // onSubmittedWorkDone, and a trampoline the driver may still call must never be freed —
+        // by `close()` or by the collector taking the wrapper this field is the only reference to.
+        this._onSubmittedWorkDoneCallback = retain(new JSCallback(
             (status: number, _userdata1: Pointer | null, _userdata2: Pointer | null) => {
                 this.instanceTicker.unregister();
                 if (status === QueueWorkDoneStatus.Success) {
@@ -46,7 +50,7 @@ export class GPUQueueImpl implements GPUQueue {
                 args: [FFIType.u32, FFIType.pointer, FFIType.pointer],
                 returns: FFIType.void,
             }
-        )
+        ))
     }
 
     submit(commandBuffers: Iterable<GPUCommandBuffer>): undefined {
@@ -246,7 +250,9 @@ export class GPUQueueImpl implements GPUQueue {
     }
 
     destroy(): undefined {
-        this._onSubmittedWorkDoneCallback.close();
+        // The work-done trampoline is NOT closed. Releasing the queue is exactly when the driver
+        // cancels the futures it still holds, and it calls this pointer to do it — a closed
+        // trampoline is a freed page, and the process dies inside the driver's own event pump.
         this.lib.wgpuQueueRelease(this.ptr);
     }
 }

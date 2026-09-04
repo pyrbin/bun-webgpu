@@ -53,6 +53,7 @@ import {
   AsyncStatus,
   unpackUserDataId,
   packUserDataId,
+  retain,
 } from "./shared.js"
 import { GPUAdapterInfoImpl, WGPUErrorType } from "./shared.js"
 import { EventEmitter } from "events"
@@ -125,6 +126,29 @@ const DEFAULT_LIMITS = Object.freeze(
 let createComputePipelineAsyncId = 0
 let createRenderPipelineAsyncId = 0
 
+/**
+ * Settle every outstanding request of `pending` when a callback's userdata named none of them.
+ *
+ * The token a callback carries is read back through the id pool, which answers `-1` for a pointer
+ * it no longer owns (a recycled block, or a win32 argument that arrived shifted). The map is KEYED
+ * by that token, so the one request it belonged to cannot be named — and a handler that only logged
+ * and returned left its caller awaiting a promise nothing would ever settle, which is a silent hang
+ * where the throw it replaced was at least visible. Rejecting all of them is the widest thing the
+ * map's shape allows and the only one that cannot hang.
+ */
+function rejectStranded<T extends { reject: (reason?: any) => void }>(
+  pending: Map<number, T>,
+  what: string,
+  id: number,
+): void {
+  const error = new OperationError(
+    `${what}: callback userdata (${id}) was not this pool's — ${pending.size} outstanding request(s) rejected`,
+  )
+  console.error(error.message)
+  for (const entry of pending.values()) entry.reject(error)
+  pending.clear()
+}
+
 export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
   readonly ptr: Pointer
   readonly queuePtr: Pointer
@@ -190,119 +214,123 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
       this._lostPromiseResolve = resolve
     })
 
-    this._popErrorScopeCallback = new JSCallback(
-      (
-        status: number,
-        errorType: number,
-        messagePtr: Pointer | null,
-        messageSize: bigint,
-        userdata1: Pointer,
-        userdata2: Pointer | null,
-      ) => {
-        this.instanceTicker.unregister()
+    // The three callbacks below outlive this constructor by the device's whole life — Dawn calls
+    // them from its own event pump — so each is retained: a trampoline the driver may still call
+    // must never be freed, by `close()` or by the collector taking its wrapper.
+    this._popErrorScopeCallback = retain(
+      new JSCallback(
+        (
+          status: number,
+          errorType: number,
+          messagePtr: Pointer | null,
+          messageSize: bigint,
+          userdata1: Pointer,
+          userdata2: Pointer | null,
+        ) => {
+          this.instanceTicker.unregister()
 
-        const popId = unpackUserDataId(userdata1)
-        const promiseData = this._popErrorScopePromises.get(popId)
+          const popId = unpackUserDataId(userdata1)
+          const promiseData = this._popErrorScopePromises.get(popId)
 
-        this._popErrorScopePromises.delete(popId)
+          this._popErrorScopePromises.delete(popId)
 
-        if (promiseData) {
-          if (messageSize === 0n) {
-            promiseData.resolve(null)
-          } else if (status === PopErrorScopeStatus.Error) {
-            const message = decodeCallbackMessage(messagePtr, messageSize)
-            promiseData.reject(new OperationError(message))
-          } else {
-            const message = decodeCallbackMessage(messagePtr, messageSize)
-            const error = createWGPUError(errorType, message)
-            promiseData.resolve(error)
-          }
-        } else {
-          console.error(
-            "[POP ERROR SCOPE CALLBACK] promise not found for ID:",
-            popId,
-            "Map size:",
-            this._popErrorScopePromises.size,
-          )
-        }
-      },
-      {
-        args: [FFIType.u32, FFIType.u32, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
-      },
-    )
-
-    this._createComputePipelineAsyncCallback = new JSCallback(
-      (
-        status: number,
-        pipeline: Pointer | null,
-        messagePtr: Pointer | null,
-        messageSize: bigint,
-        userdata1: Pointer,
-        userdata2: Pointer | null,
-      ) => {
-        this.instanceTicker.unregister()
-
-        const asyncId = unpackUserDataId(userdata1)
-        const promiseData = this._createComputePipelineAsyncPromises.get(asyncId)
-
-        this._createComputePipelineAsyncPromises.delete(asyncId)
-
-        if (promiseData) {
-          if (status === AsyncStatus.Success) {
-            if (pipeline) {
-              const computePipeline = new GPUComputePipelineImpl(pipeline, this.lib, "async-compute-pipeline")
-              promiseData.resolve(computePipeline)
+          if (promiseData) {
+            if (messageSize === 0n) {
+              promiseData.resolve(null)
+            } else if (status === PopErrorScopeStatus.Error) {
+              const message = decodeCallbackMessage(messagePtr, messageSize)
+              promiseData.reject(new OperationError(message))
             } else {
-              promiseData.reject(new Error("Pipeline creation succeeded but pipeline is null"))
+              const message = decodeCallbackMessage(messagePtr, messageSize)
+              const error = createWGPUError(errorType, message)
+              promiseData.resolve(error)
             }
           } else {
-            const message = messagePtr ? decodeCallbackMessage(messagePtr, messageSize) : "Unknown error"
-            promiseData.reject(new GPUPipelineErrorImpl(message, { reason: "validation" }))
+            rejectStranded(this._popErrorScopePromises, "popErrorScope", popId)
           }
-        } else {
-          console.error("[CREATE COMPUTE PIPELINE ASYNC CALLBACK] promise not found")
-        }
-      },
-      {
-        args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
-      },
+        },
+        {
+          args: [FFIType.u32, FFIType.u32, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
+        },
+      ),
     )
 
-    this._createRenderPipelineAsyncCallback = new JSCallback(
-      (
-        status: number,
-        pipeline: Pointer | null,
-        messagePtr: Pointer | null,
-        messageSize: bigint,
-        userdata1: Pointer,
-        userdata2: Pointer | null,
-      ) => {
-        this.instanceTicker.unregister()
+    this._createComputePipelineAsyncCallback = retain(
+      new JSCallback(
+        (
+          status: number,
+          pipeline: Pointer | null,
+          messagePtr: Pointer | null,
+          messageSize: bigint,
+          userdata1: Pointer,
+          userdata2: Pointer | null,
+        ) => {
+          this.instanceTicker.unregister()
 
-        const asyncId = unpackUserDataId(userdata1)
-        const promiseData = this._createRenderPipelineAsyncPromises.get(asyncId)
+          const asyncId = unpackUserDataId(userdata1)
+          const promiseData = this._createComputePipelineAsyncPromises.get(asyncId)
 
-        this._createRenderPipelineAsyncPromises.delete(asyncId)
+          this._createComputePipelineAsyncPromises.delete(asyncId)
 
-        if (promiseData) {
-          if (status === AsyncStatus.Success) {
-            if (pipeline) {
-              const renderPipeline = new GPURenderPipelineImpl(pipeline, this.lib, "async-render-pipeline")
-              promiseData.resolve(renderPipeline)
+          if (promiseData) {
+            if (status === AsyncStatus.Success) {
+              if (pipeline) {
+                const computePipeline = new GPUComputePipelineImpl(pipeline, this.lib, "async-compute-pipeline")
+                promiseData.resolve(computePipeline)
+              } else {
+                promiseData.reject(new Error("Pipeline creation succeeded but pipeline is null"))
+              }
             } else {
-              promiseData.reject(new Error("Pipeline creation succeeded but pipeline is null"))
+              const message = messagePtr ? decodeCallbackMessage(messagePtr, messageSize) : "Unknown error"
+              promiseData.reject(new GPUPipelineErrorImpl(message, { reason: "validation" }))
             }
           } else {
-            const message = messagePtr ? decodeCallbackMessage(messagePtr, messageSize) : "Unknown error"
-            promiseData.reject(new GPUPipelineErrorImpl(message, { reason: "validation" }))
+            rejectStranded(this._createComputePipelineAsyncPromises, "createComputePipelineAsync", asyncId)
           }
-        } else {
-          console.error("[CREATE RENDER PIPELINE ASYNC CALLBACK] promise not found")
-        }
-      },
-      {
-        args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
-      },
+        },
+        {
+          args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
+        },
+      ),
+    )
+
+    this._createRenderPipelineAsyncCallback = retain(
+      new JSCallback(
+        (
+          status: number,
+          pipeline: Pointer | null,
+          messagePtr: Pointer | null,
+          messageSize: bigint,
+          userdata1: Pointer,
+          userdata2: Pointer | null,
+        ) => {
+          this.instanceTicker.unregister()
+
+          const asyncId = unpackUserDataId(userdata1)
+          const promiseData = this._createRenderPipelineAsyncPromises.get(asyncId)
+
+          this._createRenderPipelineAsyncPromises.delete(asyncId)
+
+          if (promiseData) {
+            if (status === AsyncStatus.Success) {
+              if (pipeline) {
+                const renderPipeline = new GPURenderPipelineImpl(pipeline, this.lib, "async-render-pipeline")
+                promiseData.resolve(renderPipeline)
+              } else {
+                promiseData.reject(new Error("Pipeline creation succeeded but pipeline is null"))
+              }
+            } else {
+              const message = messagePtr ? decodeCallbackMessage(messagePtr, messageSize) : "Unknown error"
+              promiseData.reject(new GPUPipelineErrorImpl(message, { reason: "validation" }))
+            }
+          } else {
+            rejectStranded(this._createRenderPipelineAsyncPromises, "createRenderPipelineAsync", asyncId)
+          }
+        },
+        {
+          args: [FFIType.u32, FFIType.pointer, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
+        },
+      ),
     )
   }
 

@@ -120,6 +120,21 @@ export class BufferPool {
   }
 
   /**
+   * True when `blockIndex` names a block this pool currently has out on loan. Callers that read an
+   * index back out of foreign memory ask this first: a native callback carrying a token the pool no
+   * longer owns must be dropped, not released a second time.
+   *
+   * It answers OWNERSHIP, never identity: indices are recycled, so a stale token whose block has
+   * since been loaned to someone else reads as owned and cannot be told from the live one.
+   */
+  owns(blockIndex: number): boolean {
+    if (!Number.isInteger(blockIndex) || blockIndex < 0 || blockIndex >= this.currentBlocks) {
+      return false
+    }
+    return this.bufferToBlockIndex.has(this.buffers[blockIndex]!)
+  }
+
+  /**
    * Get the ArrayBuffer for a specific block index.
    */
   getBuffer(blockIndex: number): ArrayBuffer {

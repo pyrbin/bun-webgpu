@@ -1,10 +1,10 @@
 import { FFIType, JSCallback, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
 import type { FFISymbols } from "./ffi.js";
 import { BufferUsageFlags } from "./common.js";
-import { fatalError, OperationError } from "./utils/error.js";
+import { AbortError, fatalError, OperationError } from "./utils/error.js";
 import { WGPUCallbackInfoStruct } from "./structs_def.js";
 import type { InstanceTicker } from "./GPU.js";
-import { AsyncStatus, decodeCallbackMessage, packUserDataId, unpackUserDataId } from "./shared.js";
+import { AsyncStatus, decodeCallbackMessage, packUserDataId, retain, unpackUserDataId } from "./shared.js";
 import type { GPUDeviceImpl } from "./GPUDevice.js";
 import { EventEmitter } from "events";
 
@@ -13,8 +13,7 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
     private _descriptor: GPUBufferDescriptor;
     private _mapState: GPUBufferMapState = 'unmapped';
     private _pendingMap: Promise<undefined> | null = null;
-    private _mapCallback: JSCallback;
-    private _mapCallbackCloseScheduled = false;
+    private _mapCallback: JSCallback | null = null;
     private _mapCallbackPromiseData: {
       resolve: (value: undefined) => void;
       reject: (reason?: any) => void;
@@ -46,9 +45,20 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
         this._mappedOffset = 0;
         this._mappedSize = this._size;
       }
+    }
 
-      this._mapCallback = new JSCallback(
-        (status: number, messagePtr: Pointer | null, messageSize: bigint, userdata1: Pointer, _userdata2: Pointer | null) => {   
+    /** the map trampoline, built on the FIRST `mapAsync` and reused by every later one.
+     *
+     *  It is ~26 KB of FFI page that is never freed (see `destroy`), and most buffers a frame
+     *  creates are never mapped at all — one traced run held 2,266 buffers, which is ~59 MB of
+     *  trampoline for nothing when the constructor builds one per buffer. Reentrancy is not a
+     *  hazard: `mapAsync` refuses a second map while one is pending, and every map on this buffer
+     *  goes through this same callback. */
+    private _mapTrampoline(): JSCallback {
+      const held = this._mapCallback;
+      if (held !== null) return held;
+      const callback = retain(new JSCallback(
+        (status: number, messagePtr: Pointer | null, messageSize: bigint, userdata1: Pointer, _userdata2: Pointer | null) => {
           this.instanceTicker.unregister();
           this._pendingMap = null;
           
@@ -93,28 +103,14 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
           }
 
           this._mapCallbackPromiseData = null;
-
-          if (this._destroyed) {
-            this._scheduleMapCallbackClose();
-          }
         },
         {
             args: [FFIType.u32, FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.pointer],
             returns: FFIType.void,
         }
-      );
-    }
-
-    private _scheduleMapCallbackClose(): void {
-      if (this._mapCallbackCloseScheduled) {
-        return;
-      }
-
-      this._mapCallbackCloseScheduled = true;
-      const callbackToClose = this._mapCallback;
-      queueMicrotask(() => {
-        callbackToClose.close();
-      });
+      ));
+      this._mapCallback = callback;
+      return callback;
     }
 
     private _checkRangeOverlap(newOffset: number, newSize: number): boolean {
@@ -180,13 +176,14 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
             reject,
           };
 
-          if (!this._mapCallback.ptr) {
+          const mapCallback = this._mapTrampoline();
+          if (!mapCallback.ptr) {
             fatalError('Could not create buffer map callback');
           }
 
           const callbackInfo = WGPUCallbackInfoStruct.pack({
             mode: 'AllowProcessEvents',
-            callback: this._mapCallback.ptr,
+            callback: mapCallback.ptr,
             userdata1: userDataPtr,
           });
 
@@ -380,9 +377,13 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
         this._destroyed = true;
         this.emit('destroyed');
         this._mapState = 'unmapped';
-        if (!this._pendingMap) {
-          this._scheduleMapCallbackClose();
-        }
+        // The map callback is NOT closed here, or anywhere — a buffer that never mapped has none
+        // to close, and one that did keeps it. `close()` frees the FFI trampoline's
+        // page, and a destroy is exactly the moment the driver may still hold that pointer in an
+        // event it has not retired: it delivers one on a LATER wgpuInstanceProcessEvents, jumps
+        // into the freed page, and the process dies six frames inside the driver with a fault
+        // address that is the trampoline's own. Measured 2026-09-03 over `bun test tests/gpu`:
+        // 6 crashes in 15 runs with these closes, 0 in 21 without them.
       } catch (e) {
          console.error("Error calling bufferDestroy FFI function:", e);
       }
