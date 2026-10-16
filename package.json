@@ -49,9 +49,6 @@
     "sharp": "^0.34.0",
     "prettier": "3.6.2"
   },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
   "prettier": {
     "semi": false,
     "printWidth": 120
