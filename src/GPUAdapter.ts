@@ -31,6 +31,63 @@ const RequestDeviceStatus = {
 } as const
 const ReverseDeviceStatus = Object.fromEntries(Object.entries(RequestDeviceStatus).map(([key, value]) => [value, key]))
 
+/** Dawn's blob cache, handed to `requestDevice({ blobCache })`: Dawn keys each compiled shader and
+ *  pipeline (the key hashes the source, adapter and toggles) and asks `load` before compiling.
+ *  `key` and `value` view native memory valid only during the call; neither may throw. */
+export interface BlobCache {
+  load(key: Uint8Array): Uint8Array | undefined
+  store(key: Uint8Array, value: Uint8Array): void
+}
+
+const CACHE_FN = { args: [FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.u64, FFIType.pointer] } as const
+const CACHE_ISOLATION = Buffer.from("bun-webgpu\0")
+// descriptors live as long as the device may call back through them, like the retained callbacks.
+const cacheChains: BigUint64Array[] = []
+
+function cacheChain(cache: BlobCache): Pointer {
+  // Dawn asks the size with a null value, then again with a buffer of that size.
+  let held: Uint8Array | undefined
+  const load = retain(
+    new JSCallback(
+      (key: Pointer, keySize: number | bigint, value: Pointer | null, valueSize: number | bigint) => {
+        if (value === null) {
+          held = cache.load(new Uint8Array(toArrayBuffer(key, 0, Number(keySize))))
+          return held?.length ?? 0
+        }
+        const got = held
+        held = undefined
+        if (got === undefined || got.length !== Number(valueSize)) return 0
+        new Uint8Array(toArrayBuffer(value, 0, got.length)).set(got)
+        return got.length
+      },
+      { ...CACHE_FN, returns: FFIType.u64 },
+    ),
+  )
+  const store = retain(
+    new JSCallback(
+      (key: Pointer, keySize: number | bigint, value: Pointer, valueSize: number | bigint) => {
+        cache.store(
+          new Uint8Array(toArrayBuffer(key, 0, Number(keySize))),
+          new Uint8Array(toArrayBuffer(value, 0, Number(valueSize))),
+        )
+      },
+      { ...CACHE_FN, returns: FFIType.void },
+    ),
+  )
+  // WGPUDawnCacheDeviceDescriptor: chain {next, sType}, isolationKey {data, length}, load, store, userdata
+  const desc = new BigUint64Array([
+    0n,
+    0x00050007n,
+    BigInt(ptr(CACHE_ISOLATION)),
+    BigInt(CACHE_ISOLATION.length - 1),
+    BigInt(load.ptr as unknown as number),
+    BigInt(store.ptr as unknown as number),
+    0n,
+  ])
+  cacheChains.push(desc)
+  return ptr(desc)
+}
+
 const EMPTY_ADAPTER_INFO: Readonly<GPUAdapterInfo> = Object.create(GPUAdapterInfoImpl.prototype)
 const DEFAULT_LIMITS = Object.freeze(
   Object.assign(Object.create(GPUSupportedLimitsImpl.prototype), {
@@ -215,7 +272,7 @@ export class GPUAdapterImpl implements GPUAdapter {
     }
   }
 
-  requestDevice(descriptor?: GPUDeviceDescriptor): Promise<GPUDevice> {
+  requestDevice(descriptor?: GPUDeviceDescriptor & { blobCache?: BlobCache }): Promise<GPUDevice> {
     if (this._destroyed) {
       return Promise.reject(new Error("Adapter destroyed"))
     }
@@ -291,6 +348,7 @@ export class GPUAdapterImpl implements GPUAdapter {
           defaultQueue: GPUQueueDescriptor
         } = {
           ...descriptor,
+          ...(descriptor?.blobCache ? { nextInChain: cacheChain(descriptor.blobCache) } : {}),
           uncapturedErrorCallbackInfo: {
             callback: uncapturedErrorCallback.ptr,
             userdata1: null,
