@@ -1,4 +1,5 @@
-import { FFIType, JSCallback, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
+import { FFIType, JSCallback, toArrayBuffer, type Pointer } from "bun:ffi";
+import { ptr } from "./structs_ffi.js";
 import type { FFISymbols } from "./ffi.js";
 import { BufferUsageFlags } from "./common.js";
 import { AbortError, fatalError, OperationError } from "./utils/error.js";

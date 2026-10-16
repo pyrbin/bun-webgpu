@@ -1,4 +1,5 @@
-import { ptr, type Pointer } from "bun:ffi";
+import { type Pointer } from "bun:ffi";
+import { ptr } from "./structs_ffi.js";
 import type { FFISymbols } from "./ffi.js";
 import { GPUTextureViewImpl } from "./GPUTextureView.js";
 import { fatalError } from "./utils/error.js";

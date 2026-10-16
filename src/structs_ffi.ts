@@ -1,5 +1,17 @@
-import { ptr, toArrayBuffer, type Pointer } from "bun:ffi";
+import { ptr as address, toArrayBuffer, type Pointer } from "bun:ffi";
 import { fatalError } from "./utils/error.js";
+
+const pinned: unknown[] = [];
+const unpin = () => { pinned.length = 0; };
+
+/** bun:ffi's `ptr`, keeping the buffer reachable until the current job ends. `ptr` hands native code a
+ *  bare address: a buffer only a packed struct points at (an encoded string, a nested struct or array)
+ *  is otherwise collectable before the FFI call that reads it, and Dawn reads freed bytes. */
+export function ptr(view: Parameters<typeof address>[0], byteOffset?: number): Pointer {
+  if (pinned.length === 0) queueMicrotask(unpin);
+  pinned.push(view);
+  return address(view, byteOffset);
+}
 
 export const pointerSize = process.arch === 'x64' || process.arch === 'arm64' ? 8 : 4;
 

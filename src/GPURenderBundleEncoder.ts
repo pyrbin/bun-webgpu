@@ -1,4 +1,5 @@
-import { type Pointer, ptr } from "bun:ffi";
+import { type Pointer } from "bun:ffi";
+import { ptr } from "./structs_ffi.js";
 import type { FFISymbols } from "./ffi.js";
 import { GPURenderBundleImpl } from "./GPURenderBundle.js";
 import { WGPURenderBundleDescriptorStruct, WGPUIndexFormat, WGPUStringView } from "./structs_def.js";

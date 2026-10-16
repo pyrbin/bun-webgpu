@@ -6,7 +6,7 @@ import {
     allocStruct,
     packObjectArray,
 } from "./structs_ffi.js";
-import { toArrayBuffer } from "bun:ffi";
+import { toArrayBuffer, type Pointer } from "bun:ffi";
 
 describe("Structs FFI", () => {
 
@@ -3083,3 +3083,17 @@ describe("Structs FFI", () => {
         });
     });
 }); 
+
+describe("ptr", () => {
+    it("keeps a packed string's bytes alive past a collection until the job ends", () => {
+        const View = defineStruct([["data", "char*"], ["length", "u64"]] as const);
+        const text = Array.from({ length: 2000 }, (_, i) => `const c${i}: u32 = ${i}u;`).join("\n");
+        const packed = new DataView(View.pack({ data: text, length: BigInt(text.length) }));
+        const address = Number(packed.getBigUint64(0, true));
+        Bun.gc(true);
+        const garbage = Array.from({ length: 64 }, () => new Uint8Array(text.length));
+        const read = new TextDecoder().decode(toArrayBuffer(address as Pointer, 0, text.length));
+        expect(garbage.length).toBe(64);
+        expect(read).toBe(text);
+    });
+});

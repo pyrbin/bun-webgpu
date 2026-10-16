@@ -1,4 +1,5 @@
-import { FFIType, JSCallback, type Pointer, ptr } from "bun:ffi";
+import { FFIType, JSCallback, type Pointer } from "bun:ffi";
+import { ptr } from "./structs_ffi.js";
 import type { FFISymbols } from "./ffi.js";
 import { fatalError } from "./utils/error.js";
 import { packObjectArray } from "./structs_ffi.js";

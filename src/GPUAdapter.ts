@@ -1,5 +1,6 @@
 /// <reference types="../index.d.ts" />
-import { type Pointer, FFIType, JSCallback, ptr, toArrayBuffer } from "bun:ffi"
+import { type Pointer, FFIType, JSCallback, toArrayBuffer } from "bun:ffi"
+import { ptr } from "./structs_ffi.js"
 import type { FFISymbols } from "./ffi.js"
 import { GPUDeviceImpl } from "./GPUDevice.js"
 import {

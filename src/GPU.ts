@@ -1,5 +1,6 @@
 /// <reference types="@webgpu/types" />
-import { JSCallback, type Pointer, ptr, FFIType } from "bun:ffi";
+import { JSCallback, type Pointer, FFIType } from "bun:ffi";
+import { ptr } from "./structs_ffi.js";
 import { type FFISymbols } from "./ffi.js";
 import { GPUAdapterImpl } from "./GPUAdapter.js";
 import { 

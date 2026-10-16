@@ -1,4 +1,5 @@
-import { FFIType, JSCallback, type Pointer, ptr } from "bun:ffi"
+import { FFIType, JSCallback, type Pointer } from "bun:ffi"
+import { ptr } from "./structs_ffi.js"
 import {
   WGPUSupportedFeaturesStruct,
   WGPUFragmentStateStruct,
