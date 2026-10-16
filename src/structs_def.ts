@@ -517,11 +517,9 @@ export const WGPULimitsStruct = defineStruct([
     ['maxComputeWorkgroupSizeY', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxComputeWorkgroupSizeY, validate: validateLimitField }],
     ['maxComputeWorkgroupSizeZ', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxComputeWorkgroupSizeZ, validate: validateLimitField }],
     ['maxComputeWorkgroupsPerDimension', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxComputeWorkgroupsPerDimension, validate: validateLimitField }],
+    // the shipped Dawn's WGPULimits ends at this field (152 bytes): one past it reads as 0, and
+    // requiredLimits then refuses its own default against that 0.
     ['maxImmediateSize', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxImmediateSize, validate: validateLimitField }],
-    ['maxStorageBuffersInVertexStage', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxStorageBuffersInVertexStage, validate: validateLimitField }],
-    ['maxStorageTexturesInVertexStage', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxStorageTexturesInVertexStage, validate: validateLimitField }],
-    ['maxStorageBuffersInFragmentStage', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxStorageBuffersInFragmentStage, validate: validateLimitField }],
-    ['maxStorageTexturesInFragmentStage', 'u32', { default: DEFAULT_SUPPORTED_LIMITS.maxStorageTexturesInFragmentStage, validate: validateLimitField }],
 ], {
     default: {
         ...DEFAULT_SUPPORTED_LIMITS,
