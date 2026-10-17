@@ -1,6 +1,8 @@
 import { ptr as address, toArrayBuffer, type Pointer } from "bun:ffi";
 import { fatalError } from "./utils/error.js";
 
+// shortcut: a loop that never yields holds every buffer it packs (1,000 frames of 200 descriptors held
+// 63 MB; one microtask frees all), unpin after the FFI call that reads it if a GPU caller ever loops synchronously
 const pinned: unknown[] = [];
 const unpin = () => { pinned.length = 0; };
 
