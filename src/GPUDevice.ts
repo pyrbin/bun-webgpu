@@ -50,9 +50,8 @@ import {
   normalizeIdentifier,
   DEFAULT_SUPPORTED_LIMITS,
   GPUSupportedLimitsImpl,
-  decodeCallbackMessage,
+  callbackTail,
   AsyncStatus,
-  unpackUserDataId,
   packUserDataId,
   retain,
 } from "./shared.js"
@@ -178,6 +177,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
     {
       resolve: (value: GPUComputePipeline) => void
       reject: (reason?: any) => void
+      label: string | undefined
     }
   > = new Map()
 
@@ -187,6 +187,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
     {
       resolve: (value: GPURenderPipeline) => void
       reject: (reason?: any) => void
+      label: string | undefined
     }
   > = new Map()
 
@@ -230,19 +231,17 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
         ) => {
           this.instanceTicker.unregister()
 
-          const popId = unpackUserDataId(userdata1)
+          const [message, popId] = callbackTail(messagePtr, messageSize, userdata1)
           const promiseData = this._popErrorScopePromises.get(popId)
 
           this._popErrorScopePromises.delete(popId)
 
           if (promiseData) {
-            if (messageSize === 0n) {
-              promiseData.resolve(null)
-            } else if (status === PopErrorScopeStatus.Error) {
-              const message = decodeCallbackMessage(messagePtr, messageSize)
+            if (status === PopErrorScopeStatus.Error) {
               promiseData.reject(new OperationError(message))
+            } else if (errorType === WGPUErrorType["no-error"]) {
+              promiseData.resolve(null)
             } else {
-              const message = decodeCallbackMessage(messagePtr, messageSize)
               const error = createWGPUError(errorType, message)
               promiseData.resolve(error)
             }
@@ -268,7 +267,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
         ) => {
           this.instanceTicker.unregister()
 
-          const asyncId = unpackUserDataId(userdata1)
+          const [message, asyncId] = callbackTail(messagePtr, messageSize, userdata1)
           const promiseData = this._createComputePipelineAsyncPromises.get(asyncId)
 
           this._createComputePipelineAsyncPromises.delete(asyncId)
@@ -276,13 +275,12 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
           if (promiseData) {
             if (status === AsyncStatus.Success) {
               if (pipeline) {
-                const computePipeline = new GPUComputePipelineImpl(pipeline, this.lib, "async-compute-pipeline")
+                const computePipeline = new GPUComputePipelineImpl(pipeline, this.lib, promiseData.label)
                 promiseData.resolve(computePipeline)
               } else {
                 promiseData.reject(new Error("Pipeline creation succeeded but pipeline is null"))
               }
             } else {
-              const message = messagePtr ? decodeCallbackMessage(messagePtr, messageSize) : "Unknown error"
               promiseData.reject(new GPUPipelineErrorImpl(message, { reason: "validation" }))
             }
           } else {
@@ -307,7 +305,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
         ) => {
           this.instanceTicker.unregister()
 
-          const asyncId = unpackUserDataId(userdata1)
+          const [message, asyncId] = callbackTail(messagePtr, messageSize, userdata1)
           const promiseData = this._createRenderPipelineAsyncPromises.get(asyncId)
 
           this._createRenderPipelineAsyncPromises.delete(asyncId)
@@ -315,13 +313,12 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
           if (promiseData) {
             if (status === AsyncStatus.Success) {
               if (pipeline) {
-                const renderPipeline = new GPURenderPipelineImpl(pipeline, this.lib, "async-render-pipeline")
+                const renderPipeline = new GPURenderPipelineImpl(pipeline, this.lib, promiseData.label)
                 promiseData.resolve(renderPipeline)
               } else {
                 promiseData.reject(new Error("Pipeline creation succeeded but pipeline is null"))
               }
             } else {
-              const message = messagePtr ? decodeCallbackMessage(messagePtr, messageSize) : "Unknown error"
               promiseData.reject(new GPUPipelineErrorImpl(message, { reason: "validation" }))
             }
           } else {
@@ -944,7 +941,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
     return new Promise((resolve, reject) => {
       const id = createComputePipelineAsyncId++
       const userDataBuffer = packUserDataId(id)
-      this._createComputePipelineAsyncPromises.set(id, { resolve, reject })
+      this._createComputePipelineAsyncPromises.set(id, { resolve, reject, label: descriptor.label })
       const userDataPtr = ptr(userDataBuffer)
       const packedPipelineDescriptor = this._prepareComputePipelineDescriptor(descriptor)
       const callbackInfo = WGPUCallbackInfoStruct.pack({
@@ -998,7 +995,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
     return new Promise((resolve, reject) => {
       const id = createRenderPipelineAsyncId++
       const userDataBuffer = packUserDataId(id)
-      this._createRenderPipelineAsyncPromises.set(id, { resolve, reject })
+      this._createRenderPipelineAsyncPromises.set(id, { resolve, reject, label: descriptor.label })
       const userDataPtr = ptr(userDataBuffer)
       const packedPipelineDescriptor = this._prepareRenderPipelineDescriptor(descriptor)
       const callbackInfo = WGPUCallbackInfoStruct.pack({

@@ -5,7 +5,7 @@ import { BufferUsageFlags } from "./common.js";
 import { AbortError, fatalError, OperationError } from "./utils/error.js";
 import { WGPUCallbackInfoStruct } from "./structs_def.js";
 import type { InstanceTicker } from "./GPU.js";
-import { AsyncStatus, decodeCallbackMessage, packUserDataId, retain, unpackUserDataId } from "./shared.js";
+import { AsyncStatus, callbackTail, packUserDataId, retain } from "./shared.js";
 import type { GPUDeviceImpl } from "./GPUDevice.js";
 import { EventEmitter } from "events";
 
@@ -63,19 +63,7 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
           this.instanceTicker.unregister();
           this._pendingMap = null;
           
-          // Note: Workaround for windows, where the message is not spread across multiple arguments
-          const message = decodeCallbackMessage(messagePtr, process.platform === 'win32' ? undefined : messageSize);
-          
-          let actualUserData: Pointer | number;
-          // TODO: The zig wrapper should probably wrap the callback as well and pass the arguemnts correctly
-          if (process.platform === 'win32') {
-            // On windows, the WGPUStringView as value is not spread across multiple arguments, for some reason,
-            // so we need to pass the messageSize as the userdata1 pointer
-            actualUserData = Number(messageSize as unknown as Pointer);
-          } else {
-            actualUserData = userdata1;
-          }
-          const userData = unpackUserDataId(actualUserData as Pointer);
+          const [message, userData] = callbackTail(messagePtr, messageSize, userdata1);
           
           if (status === AsyncStatus.Success) {
               this._mapState = 'mapped';

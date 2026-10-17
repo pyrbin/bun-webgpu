@@ -1,5 +1,6 @@
 /// <reference types="../index.d.ts" />
-import { type Pointer, FFIType, JSCallback, toArrayBuffer } from "bun:ffi"
+import { type Pointer, cc, FFIType, JSCallback } from "bun:ffi"
+import { join } from "node:path"
 import { ptr } from "./structs_ffi.js"
 import type { FFISymbols } from "./ffi.js"
 import { GPUDeviceImpl } from "./GPUDevice.js"
@@ -32,60 +33,25 @@ const RequestDeviceStatus = {
 } as const
 const ReverseDeviceStatus = Object.fromEntries(Object.entries(RequestDeviceStatus).map(([key, value]) => [value, key]))
 
-/** Dawn's blob cache, handed to `requestDevice({ blobCache })`: Dawn keys each compiled shader and
- *  pipeline (the key hashes the source, adapter and toggles) and asks `load` before compiling.
- *  `key` and `value` view native memory valid only during the call; neither may throw. */
-export interface BlobCache {
-  load(key: Uint8Array): Uint8Array | undefined
-  store(key: Uint8Array, value: Uint8Array): void
-}
-
-const CACHE_FN = { args: [FFIType.pointer, FFIType.u64, FFIType.pointer, FFIType.u64, FFIType.pointer] } as const
 const CACHE_ISOLATION = Buffer.from("bun-webgpu\0")
-// descriptors live as long as the device may call back through them, like the retained callbacks.
-const cacheChains: BigUint64Array[] = []
+// descriptors and directory names live as long as the device may call back through them.
+const cacheChains: (BigUint64Array | Buffer)[] = []
+// blob_cache.c, compiled once a process at the first cached device and held for its life: Dawn
+// calls it from its compile worker threads, where a JSCallback that must answer would wait on the
+// JS thread forever.
+let blobCache: ReturnType<typeof cc> | undefined
 
-function cacheChain(cache: BlobCache): Pointer {
-  // Dawn asks the size with a null value, then again with a buffer of that size.
-  let held: Uint8Array | undefined
-  const load = retain(
-    new JSCallback(
-      (key: Pointer, keySize: number | bigint, value: Pointer | null, valueSize: number | bigint) => {
-        if (value === null) {
-          held = cache.load(new Uint8Array(toArrayBuffer(key, 0, Number(keySize))))
-          return held?.length ?? 0
-        }
-        const got = held
-        held = undefined
-        if (got === undefined || got.length !== Number(valueSize)) return 0
-        new Uint8Array(toArrayBuffer(value, 0, got.length)).set(got)
-        return got.length
-      },
-      { ...CACHE_FN, returns: FFIType.u64 },
-    ),
-  )
-  const store = retain(
-    new JSCallback(
-      (key: Pointer, keySize: number | bigint, value: Pointer, valueSize: number | bigint) => {
-        cache.store(
-          new Uint8Array(toArrayBuffer(key, 0, Number(keySize))),
-          new Uint8Array(toArrayBuffer(value, 0, Number(valueSize))),
-        )
-      },
-      { ...CACHE_FN, returns: FFIType.void },
-    ),
-  )
+function cacheChain(dir: string): Pointer {
+  blobCache ??= cc({
+    source: join(import.meta.dir, "blob_cache.c"),
+    symbols: { blob_functions: { args: [FFIType.pointer], returns: FFIType.void } },
+  })
+  const name = Buffer.from(`${dir.replace(/[\\/]+$/, "")}/\0`)
+  if (name.length > 900) throw new OperationError(`blobCache directory name too long (${name.length} bytes, 900 at most)`)
   // WGPUDawnCacheDeviceDescriptor: chain {next, sType}, isolationKey {data, length}, load, store, userdata
-  const desc = new BigUint64Array([
-    0n,
-    0x00050007n,
-    BigInt(ptr(CACHE_ISOLATION)),
-    BigInt(CACHE_ISOLATION.length - 1),
-    BigInt(load.ptr as unknown as number),
-    BigInt(store.ptr as unknown as number),
-    0n,
-  ])
-  cacheChains.push(desc)
+  const desc = new BigUint64Array([0n, 0x00050007n, BigInt(ptr(CACHE_ISOLATION)), BigInt(CACHE_ISOLATION.length - 1), 0n, 0n, BigInt(ptr(name))])
+  blobCache.symbols.blob_functions(desc.subarray(4, 6))
+  cacheChains.push(desc, name)
   return ptr(desc)
 }
 
@@ -273,7 +239,10 @@ export class GPUAdapterImpl implements GPUAdapter {
     }
   }
 
-  requestDevice(descriptor?: GPUDeviceDescriptor & { blobCache?: BlobCache }): Promise<GPUDevice> {
+  /** `blobCache` names a directory that keeps Dawn's compiled shaders and pipelines between processes
+   *  (see blob_cache.c): Dawn keys each by the source, adapter and toggles, and a hit refreshes the
+   *  file's modification time, so the owner of the directory bounds it by dropping the oldest. */
+  requestDevice(descriptor?: GPUDeviceDescriptor & { blobCache?: string }): Promise<GPUDevice> {
     if (this._destroyed) {
       return Promise.reject(new Error("Adapter destroyed"))
     }

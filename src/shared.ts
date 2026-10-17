@@ -74,6 +74,15 @@ export function unpackUserDataId(userDataPtr: Pointer): number {
     return id;
 }
 
+/** a Dawn callback's message and the id its first userdata carries, from the declared
+ *  (data, length, userdata1) arguments. Windows x64 passes the by-value WGPUStringView by
+ *  reference, so there `data` points at the view and every later argument arrives one slot early:
+ *  `length` holds userdata1. */
+export function callbackTail(data: Pointer | null, length: bigint, userdata1: Pointer): [message: string, id: number] {
+    if (process.platform === 'win32') return [decodeCallbackMessage(data), unpackUserDataId(Number(length) as Pointer)];
+    return [decodeCallbackMessage(data, length), unpackUserDataId(userdata1)];
+}
+
 export class GPUAdapterInfoImpl implements GPUAdapterInfo {
     __brand: "GPUAdapterInfo" = "GPUAdapterInfo";
     vendor: string = "";
@@ -102,7 +111,7 @@ export function normalizeIdentifier(input: string): string {
 }
 
 export function decodeCallbackMessage(messagePtr: Pointer | null, messageSize?: number | bigint): string {
-    if (!messagePtr || messageSize === 0n || messageSize === 0) {
+    if (!messagePtr || !messageSize) {
         // Windows x64 passes a by-value WGPUStringView BY REFERENCE (structs over 8 bytes), so
         // the callback's declared (pointer, u64) pair actually receives a pointer to
         // { data: ptr, length: u64 } and a shifted (null) size argument. Recover the real view
