@@ -2,7 +2,8 @@
 // downloads the release's static Windows build into dawn/libs/x86_64-windows, writes dawn/dawn.json,
 // dawn/webgpu.h and dawn/VERSION from it, regenerates src/enums.ts and builds
 // src/lib/x86_64-windows/webgpu_wrapper.dll. Then `bun test`: src/dawn.test.ts holds every enum number
-// and struct layout to the new header. Needs gh, tar, Zig 0.14.1 on PATH and MSVC's link.exe.
+// and struct layout to the new header. Needs gh, tar, pwsh, Zig 0.14.1 on PATH and the MSVC
+// toolset the release was built with (v20261105: VS 2026, MSVC 14.51).
 import { $ } from "bun"
 import { cpSync, existsSync, mkdirSync, rmSync } from "fs"
 import { tmpdir } from "os"
@@ -44,8 +45,9 @@ const dxc = (await $`gh release view -R microsoft/DirectXShaderCompiler --json t
 const dxcCache = join(tmpdir(), `dxc-${dxc}`)
 if (!existsSync(join(dxcCache, "bin"))) {
   mkdirSync(dxcCache, { recursive: true })
-  await $`gh release download ${dxc} -R microsoft/DirectXShaderCompiler -p dxc_*.zip -D ${dxcCache} --clobber`
-  await $`tar -xf ${(await $`ls ${dxcCache}`.text()).trim()}`.cwd(dxcCache)
+  await $`gh release download ${dxc} -R microsoft/DirectXShaderCompiler -p ${"dxc_*.zip"} -D ${dxcCache} --clobber`
+  const zip = join(dxcCache, (await $`ls ${dxcCache}`.text()).trim())
+  await $`pwsh -NoProfile -Command Expand-Archive -LiteralPath ${zip} -DestinationPath ${dxcCache}`
 }
 const out = join(here, "../src/lib/x86_64-windows")
 for (const f of ["bin/x64/dxcompiler.dll", "bin/x64/dxil.dll", "LICENSE-MS.txt", "LICENSE-LLVM.txt"])

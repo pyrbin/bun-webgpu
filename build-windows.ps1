@@ -181,6 +181,8 @@ try {
         "d3d11.lib", "d3d12.lib", "dxgi.lib", "dxguid.lib"
         $runtimeLibs.Split(' ')
         "ntdll.lib"
+        # what Dawn's own CMake links on win32 (CompareObjectHandles is in no kernel32.lib)
+        "onecore_apiset.lib"
         "/LIBPATH:$msvcLib"
         "/LIBPATH:$kitLib\ucrt\x64"
         "/LIBPATH:$kitLib\um\x64"
