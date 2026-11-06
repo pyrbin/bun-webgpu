@@ -19,24 +19,6 @@ export function retain<T extends JSCallback>(callback: T): T {
     return callback;
 }
 
-export const AsyncStatus = {
-    Success: 1,
-    CallbackCancelled: 2,
-    Error: 3,
-    Aborted: 4,
-    Force32: 0x7FFFFFFF,
-} as const;
-
-export const WGPUErrorType = {
-    "no-error": 1,
-    "validation": 2,
-    "out-of-memory": 3,
-    "internal": 4,
-    "unknown": 5,
-    // "device-lost": 6,
-    "force-32": 0x7FFFFFFF
-} as const;
-
 const idBufferPool = new BufferPool(64, 1024, 8);
 
 /** claim an 8-byte block carrying `id` and its own index — pass its pointer as a callback's

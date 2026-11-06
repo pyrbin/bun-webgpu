@@ -20,22 +20,11 @@ Find out more about [WebGPU types here](https://gpuweb.github.io/types/).
 
 ## Building
 
-_Note:_ There are prebuilt binaries in the pipeline artifacts.
-
-### Prerequisites
-
-*   **Bun**: Ensure you have BunJS installed. (https://bun.sh)
-*   **Zig**: The native components of this library are written in Zig. Ensure Zig is installed and available in your PATH. (https://ziglang.org/learn/getting-started/)
-*   **Pre-built Dawn Libraries**: This project relies on pre-built Dawn libraries.
-    *   See [packages/bun-webgpu/dawn/README.md](./dawn/README.md) for details on how to download the required Dawn shared libraries.
-    * Basically just run `bun run ./dawn/download_artifacts.ts`
-
-### Building the FFI Liberary
-
-The `package.json` includes scripts to build the native library components.
-
-*   `build:dev`
-*   `build:prod`
+The Windows build is committed at `src/lib/x86_64-windows`: `webgpu_wrapper.dll` (the Zig wrapper over a
+static Dawn) and the DXC it compiles shaders with. `bun dawn/update.ts [tag]` moves it to another google/dawn
+release in one step (see [dawn/README.md](./dawn/README.md)); `bun test` then holds every enum number and
+struct layout to that release's header. It needs `gh`, Zig 0.14.1 on PATH and the MSVC build tools of the
+toolset the Dawn release was built with.
 
 ## Conformance Test Suite (CTS)
 

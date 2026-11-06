@@ -6,6 +6,7 @@ import type { FFISymbols } from "./ffi.js"
 import { GPUDeviceImpl } from "./GPUDevice.js"
 import {
   WGPUCallbackInfoStruct,
+  WGPUDawnCacheDeviceDescriptorStruct,
   WGPUDeviceDescriptorStruct,
   type WGPUUncapturedErrorCallbackInfo,
   WGPULimitsStruct,
@@ -24,18 +25,13 @@ import {
   decodeCallbackMessage,
   retain,
 } from "./shared.js"
+import { RequestDeviceStatus, SType } from "./enums.js"
 
-const RequestDeviceStatus = {
-  Success: 1,
-  CallbackCancelled: 2,
-  Error: 3,
-  Unknown: 4,
-} as const
 const ReverseDeviceStatus = Object.fromEntries(Object.entries(RequestDeviceStatus).map(([key, value]) => [value, key]))
 
-const CACHE_ISOLATION = Buffer.from("bun-webgpu\0")
+const CACHE_ISOLATION = "bun-webgpu"
 // descriptors and directory names live as long as the device may call back through them.
-const cacheChains: (BigUint64Array | Buffer)[] = []
+const cacheChains: (ArrayBuffer | Buffer)[] = []
 // blob_cache.c, compiled once a process at the first cached device and held for its life: Dawn
 // calls it from its compile worker threads, where a JSCallback that must answer would wait on the
 // JS thread forever.
@@ -48,9 +44,14 @@ function cacheChain(dir: string): Pointer {
   })
   const name = Buffer.from(`${dir.replace(/[\\/]+$/, "")}/\0`)
   if (name.length > 900) throw new OperationError(`blobCache directory name too long (${name.length} bytes, 900 at most)`)
-  // WGPUDawnCacheDeviceDescriptor: chain {next, sType}, isolationKey {data, length}, load, store, userdata
-  const desc = new BigUint64Array([0n, 0x00050007n, BigInt(ptr(CACHE_ISOLATION)), BigInt(CACHE_ISOLATION.length - 1), 0n, 0n, BigInt(ptr(name))])
-  blobCache.symbols.blob_functions(desc.subarray(4, 6))
+  const fns = new BigUint64Array(2)
+  blobCache.symbols.blob_functions!(fns)
+  const desc = WGPUDawnCacheDeviceDescriptorStruct.pack({
+    chain: { next: null, sType: SType.DawnCacheDeviceDescriptor },
+    isolationKey: CACHE_ISOLATION,
+    dawnLoadCacheDataCallbackInfo: { callback: Number(fns[0]) as Pointer, userdata1: ptr(name) },
+    dawnStoreCacheDataCallbackInfo: { callback: Number(fns[1]) as Pointer, userdata1: ptr(name) },
+  })
   cacheChains.push(desc, name)
   return ptr(desc)
 }

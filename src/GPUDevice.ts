@@ -5,7 +5,6 @@ import {
   WGPUFragmentStateStruct,
   WGPUBindGroupLayoutDescriptorStruct,
   WGPUShaderModuleDescriptorStruct,
-  WGPUSType,
   WGPUShaderSourceWGSLStruct,
   WGPUPipelineLayoutDescriptorStruct,
   WGPUBindGroupDescriptorStruct,
@@ -51,11 +50,11 @@ import {
   DEFAULT_SUPPORTED_LIMITS,
   GPUSupportedLimitsImpl,
   callbackTail,
-  AsyncStatus,
   packUserDataId,
   retain,
 } from "./shared.js"
-import { GPUAdapterInfoImpl, WGPUErrorType } from "./shared.js"
+import { GPUAdapterInfoImpl } from "./shared.js"
+import { CreatePipelineAsyncStatus, ErrorType, PopErrorScopeStatus, SType } from "./enums.js"
 import { EventEmitter } from "events"
 import { GPUTextureViewImpl } from "./GPUTextureView.js"
 import { GPURenderBundleEncoderImpl } from "./GPURenderBundleEncoder.js"
@@ -63,12 +62,6 @@ import { BufferUsageFlags } from "./common.js"
 
 type EventListenerOptions = any
 export type DeviceErrorCallback = (this: GPUDevice, ev: GPUUncapturedErrorEvent) => any
-
-const PopErrorScopeStatus = {
-  Success: 1,
-  CallbackCancelled: 2,
-  Error: 3,
-} as const
 
 function isDepthTextureFormat(format: string): boolean {
   return (
@@ -239,7 +232,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
           if (promiseData) {
             if (status === PopErrorScopeStatus.Error) {
               promiseData.reject(new OperationError(message))
-            } else if (errorType === WGPUErrorType["no-error"]) {
+            } else if (errorType === ErrorType["no-error"]) {
               promiseData.resolve(null)
             } else {
               const error = createWGPUError(errorType, message)
@@ -273,7 +266,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
           this._createComputePipelineAsyncPromises.delete(asyncId)
 
           if (promiseData) {
-            if (status === AsyncStatus.Success) {
+            if (status === CreatePipelineAsyncStatus.Success) {
               if (pipeline) {
                 const computePipeline = new GPUComputePipelineImpl(pipeline, this.lib, promiseData.label)
                 promiseData.resolve(computePipeline)
@@ -311,7 +304,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
           this._createRenderPipelineAsyncPromises.delete(asyncId)
 
           if (promiseData) {
-            if (status === AsyncStatus.Success) {
+            if (status === CreatePipelineAsyncStatus.Success) {
               if (pipeline) {
                 const renderPipeline = new GPURenderPipelineImpl(pipeline, this.lib, promiseData.label)
                 promiseData.resolve(renderPipeline)
@@ -423,7 +416,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
       fatalError("injectError on destroyed GPUDevice")
     }
 
-    const errorType = WGPUErrorType[type]
+    const errorType = ErrorType[type]
     if (errorType === undefined) {
       fatalError(`Invalid error type for injectError: ${type}`)
     }
@@ -692,7 +685,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
         const chainedStruct = WGPUExternalTextureBindingLayoutStruct.pack({
           chain: {
             next: null,
-            sType: WGPUSType.ExternalTextureBindingLayout,
+            sType: SType.ExternalTextureBindingLayout,
           },
         })
         return {
@@ -742,7 +735,7 @@ export class GPUDeviceImpl extends EventEmitter implements GPUDevice {
     const codeStruct = WGPUShaderSourceWGSLStruct.pack({
       chain: {
         next: null,
-        sType: WGPUSType.ShaderSourceWGSL,
+        sType: SType.ShaderSourceWGSL,
       },
       code: descriptor.code,
     })

@@ -1,4 +1,4 @@
-import { WGPUErrorType } from "../shared.js";
+import { ErrorType } from "../enums.js";
 
 export function fatalError(...args: any[]): never {
     const message = args.join(' ');
@@ -65,11 +65,11 @@ export class AbortError extends Error {
 
 export function createWGPUError(type: number, message: string) {
     switch (type) {
-        case WGPUErrorType['out-of-memory']:
+        case ErrorType['out-of-memory']:
             return new GPUOutOfMemoryError(message);
-        case WGPUErrorType.internal:
+        case ErrorType.internal:
             return new GPUInternalError(message);
-        case WGPUErrorType.validation:
+        case ErrorType.validation:
             return new GPUValidationError(message);
         default:
             return new GPUErrorImpl(message);

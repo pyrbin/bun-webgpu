@@ -6,19 +6,15 @@ import { fileURLToPath } from "url"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-let targetLibPath: string | null = null
-
 function debugLoader(message: string): void {
   if (process.env.WGPU_DEBUG_LOADER === "true") {
     console.error(`[ffi-loader] ${message}`)
   }
 }
 
-function resolveFromInstalledPackage(): string | null {
-  return targetLibPath
-}
-
-function resolveFromLocalBuild(): string | null {
+// the wrapper this checkout builds (dawn/update.ts), at src/lib/<arch>-<os>; no platform package is
+// looked up, so a stale one left in node_modules can never pair an older Dawn with these enum tables
+function findLibrary(): string {
   const platformMap: Record<string, string> = {
     darwin: "macos",
     linux: "linux",
@@ -46,41 +42,9 @@ function resolveFromLocalBuild(): string | null {
     debugLoader(`failed local library candidate '${candidate}'`)
   }
 
-  return null
-}
-
-function findLibrary(): string {
-  const fromPackage = resolveFromInstalledPackage()
-  if (fromPackage) {
-    return fromPackage
-  }
-
-  const fromLocal = resolveFromLocalBuild()
-  if (fromLocal) {
-    return fromLocal
-  }
-
   throw new Error(
-    `bun-webgpu is not supported on the current platform: ${process.platform}-${process.arch} (no installed package or local src/lib build found)`,
+    `bun-webgpu has no build for ${process.platform}-${process.arch}: none of ${candidates.join(", ")} (run bun dawn/update.ts)`,
   )
-}
-
-try {
-  const module = await import(`bun-webgpu-${process.platform}-${process.arch}/index.ts`)
-  let resolvedTargetLibPath = module.default as string
-
-  if (/\$bunfs/.test(resolvedTargetLibPath)) {
-    resolvedTargetLibPath = resolvedTargetLibPath.replace("../", "")
-  }
-
-  if (!existsSync(resolvedTargetLibPath)) {
-    debugLoader(`installed package resolved to missing path '${resolvedTargetLibPath}'`)
-  } else {
-    targetLibPath = resolvedTargetLibPath
-    debugLoader(`resolved installed package library -> ${targetLibPath}`)
-  }
-} catch (error) {
-  debugLoader(`failed installed package import: ${error instanceof Error ? error.message : String(error)}`)
 }
 
 function _loadLibrary(libPath?: string) {
@@ -122,7 +86,7 @@ function _loadLibrary(libPath?: string) {
     },
     zwgpuInstanceGetWGSLLanguageFeatures: {
       args: [FFIType.pointer, FFIType.pointer], // instance: WGPUInstance, features: *mut WGPUSupportedWGSLLanguageFeatures
-      returns: FFIType.u32, // -> WGPUStatus
+      returns: FFIType.void,
     },
     zwgpuInstanceRelease: {
       args: [FFIType.pointer], // instance: WGPUInstance
@@ -755,7 +719,7 @@ function _loadLibrary(libPath?: string) {
     },
     zwgpuSurfacePresent: {
       args: [FFIType.pointer], // surface: WGPUSurface
-      returns: FFIType.void,
+      returns: FFIType.u32, // -> WGPUStatus
     },
     zwgpuSurfaceRelease: {
       args: [FFIType.pointer], // surface: WGPUSurface

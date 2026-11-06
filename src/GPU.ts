@@ -11,14 +11,7 @@ import {
 import { decodeCallbackMessage, retain } from "./shared.js";
 import { fatalError } from "./utils/error.js";
 import { allocStruct } from "./structs_ffi.js";
-
-const RequestAdapterStatus = {
-  Success: 1,
-  CallbackCancelled: 2, // Not typically used directly from JS
-  Unavailable: 3,
-  Error: 4,
-  Unknown: 5,
-} as const;
+import { RequestAdapterStatus } from "./enums.js";
 
 export class InstanceTicker {
   private _waiting: number = 0;
@@ -93,13 +86,7 @@ export class GPUImpl implements GPU {
             features: 32,
           },
         });
-        const status = this.lib.wgpuInstanceGetWGSLLanguageFeatures(this.instancePtr, ptr(structBuffer));
-        
-        if (status !== 1 /* WGPUStatus_Success */) {
-          console.error(`wgpuInstanceGetWGSLLanguageFeatures failed with status: ${status}`);
-          this._wgslLanguageFeatures = Object.freeze(new Set<string>());
-          return this._wgslLanguageFeatures;
-        }
+        this.lib.wgpuInstanceGetWGSLLanguageFeatures(this.instancePtr, ptr(structBuffer));
 
         const unpacked = WGPUSupportedWGSLLanguageFeaturesStruct.unpack(structBuffer);
         const supportedFeatures = new Set<string>();

@@ -40,12 +40,9 @@ pub export fn zwgpuInstanceAddRef(instance: c.WGPUInstance) void {
     c.wgpuInstanceAddRef(instance);
 }
 
-pub export fn zwgpuInstanceGetWGSLLanguageFeatures(instance: c.WGPUInstance, js_features_struct_ptr: *c.WGPUSupportedWGSLLanguageFeatures) c.WGPUStatus {
+pub export fn zwgpuInstanceGetWGSLLanguageFeatures(instance: c.WGPUInstance, js_features_struct_ptr: *c.WGPUSupportedWGSLLanguageFeatures) void {
     var temp_dawn_features_struct: c.WGPUSupportedWGSLLanguageFeatures = undefined;
-    const status = c.wgpuInstanceGetWGSLLanguageFeatures(instance, &temp_dawn_features_struct);
-    if (status != c.WGPUStatus_Success) {
-        return status;
-    }
+    c.wgpuInstanceGetWGSLLanguageFeatures(instance, &temp_dawn_features_struct);
 
     if (temp_dawn_features_struct.featureCount > 0 and temp_dawn_features_struct.features != null) {
         const dawn_features_slice = temp_dawn_features_struct.features[0..temp_dawn_features_struct.featureCount];
@@ -59,7 +56,6 @@ pub export fn zwgpuInstanceGetWGSLLanguageFeatures(instance: c.WGPUInstance, js_
     }
 
     c.wgpuSupportedWGSLLanguageFeaturesFreeMembers(temp_dawn_features_struct);
-    return c.WGPUStatus_Success;
 }
 
 // --- Adapter Functions ---
@@ -573,8 +569,8 @@ pub export fn zwgpuSurfaceGetCurrentTexture(surface: c.WGPUSurface, surface_text
     c.wgpuSurfaceGetCurrentTexture(surface, surface_texture);
 }
 
-pub export fn zwgpuSurfacePresent(surface: c.WGPUSurface) void {
-    c.wgpuSurfacePresent(surface);
+pub export fn zwgpuSurfacePresent(surface: c.WGPUSurface) c.WGPUStatus {
+    return c.wgpuSurfacePresent(surface);
 }
 
 pub export fn zwgpuSurfaceRelease(surface: c.WGPUSurface) void {

@@ -3,7 +3,10 @@
 zig-out
 triangle.png
 src/zig/lib
-src/lib
+# the Windows build is committed (dawn/update.ts writes it): its DLLs, not the linker's .lib and .exp
+src/lib/**/*.lib
+src/lib/**/*.exp
+/*.obj
 cts
 
 # dependencies (bun install)

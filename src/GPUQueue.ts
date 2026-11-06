@@ -12,16 +12,10 @@ import {
 } from "./structs_def.js";
 import { InstanceTicker } from "./GPU.js";
 import { retain } from "./shared.js";
+import { QueueWorkDoneStatus } from "./enums.js";
 
 // Type alias for buffer sources compatible with bun:ffi ptr()
 export type PtrSource = ArrayBuffer | ArrayBufferView;
-
-export const QueueWorkDoneStatus = {
-    Success: 1,
-    CallbackCancelled: 2,
-    Error: 3,
-    Force32: 0x7FFFFFFF,
-} as const;
 
 export class GPUQueueImpl implements GPUQueue {
     __brand: "GPUQueue" = "GPUQueue";

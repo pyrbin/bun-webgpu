@@ -105,7 +105,8 @@ static u8 *keyed(const u8 *key, usize size, const char *dir, char *path, usize r
 
 #define ROOM 1024
 
-usize blob_load(const void *key, usize keySize, void *value, usize valueSize, void *dir) {
+// WGPUDawnLoadCacheDataCallback: userdata1 is the directory, userdata2 unused
+usize blob_load(usize keySize, const void *key, usize valueSize, void *value, void *dir, void *unused) {
   char path[ROOM];
   u8 *canon = keyed(key, keySize, dir, path, ROOM - 40);
   if (canon == 0) return 0;
@@ -139,7 +140,8 @@ done:
   return got;
 }
 
-void blob_store(const void *key, usize keySize, const void *value, usize valueSize, void *dir) {
+// WGPUDawnStoreCacheDataCallback: userdata1 is the directory, userdata2 unused
+void blob_store(usize keySize, const void *key, usize valueSize, const void *value, void *dir, void *unused) {
   char path[ROOM];
   char tmp[ROOM + 40];
   u8 *canon = keyed(key, keySize, dir, path, ROOM - 40);
@@ -181,7 +183,7 @@ void blob_store(const void *key, usize keySize, const void *value, usize valueSi
   free(canon);
 }
 
-// the two functions' addresses, for the cache descriptor Dawn reads them from
+// the two functions' addresses, for the cache descriptor's two callback infos
 void blob_functions(u64 *out) {
   out[0] = (u64)(usize)blob_load;
   out[1] = (u64)(usize)blob_store;

@@ -164,6 +164,10 @@ try {
         Write-Host "Using release runtime libraries"
     }
 
+    # the MSVC runtime beside link.exe and the newest Windows SDK's; PowerShell quotes a path with spaces itself
+    $msvcLib = Join-Path (Split-Path (Split-Path (Split-Path (Split-Path $linkExe)))) "lib\x64"
+    $kitLib = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Lib" | Sort-Object Name -Descending | Select-Object -First 1).FullName
+
     # Link everything into a shared library using MSVC linker
     Write-Host "Linking with: $linkExe"
     $linkArgs = @(
@@ -177,8 +181,9 @@ try {
         "d3d11.lib", "d3d12.lib", "dxgi.lib", "dxguid.lib"
         $runtimeLibs.Split(' ')
         "ntdll.lib"
-        "/LIBPATH:`"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\ucrt\x64`""
-        "/LIBPATH:`"C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\um\x64`""
+        "/LIBPATH:$msvcLib"
+        "/LIBPATH:$kitLib\ucrt\x64"
+        "/LIBPATH:$kitLib\um\x64"
         "/MACHINE:X64"
         "/SUBSYSTEM:WINDOWS"
     )

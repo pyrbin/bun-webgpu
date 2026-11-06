@@ -5,7 +5,8 @@ import { BufferUsageFlags } from "./common.js";
 import { AbortError, fatalError, OperationError } from "./utils/error.js";
 import { WGPUCallbackInfoStruct } from "./structs_def.js";
 import type { InstanceTicker } from "./GPU.js";
-import { AsyncStatus, callbackTail, packUserDataId, retain } from "./shared.js";
+import { callbackTail, packUserDataId, retain } from "./shared.js";
+import { MapAsyncStatus } from "./enums.js";
 import type { GPUDeviceImpl } from "./GPUDevice.js";
 import { EventEmitter } from "events";
 
@@ -65,13 +66,13 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
           
           const [message, userData] = callbackTail(messagePtr, messageSize, userdata1);
           
-          if (status === AsyncStatus.Success) {
+          if (status === MapAsyncStatus.Success) {
               this._mapState = 'mapped';
               this._returnedRanges = [];
               this._detachableArrayBuffers = [];
               this._mapCallbackPromiseData?.resolve(undefined);
           } else {
-              const statusName = Object.keys(AsyncStatus).find(key => AsyncStatus[key as keyof typeof AsyncStatus] === status) || 'Unknown Map Error';
+              const statusName = Object.keys(MapAsyncStatus).find(key => MapAsyncStatus[key as keyof typeof MapAsyncStatus] === status) || 'Unknown Map Error';
               const errorMessage = `WGPU Buffer Map Error (${statusName}): ${message}`;
               const wasAlreadyMapped = userData === 1;
               const wasPending = this._mapState === 'pending';
@@ -79,7 +80,7 @@ export class GPUBufferImpl extends EventEmitter implements GPUBuffer {
               this._mapState = wasAlreadyMapped ? 'mapped' : 'unmapped';
 
               switch (status) {
-                case AsyncStatus.Error:
+                case MapAsyncStatus.Error:
                   if (wasPending) {
                     this._mapCallbackPromiseData?.reject(new OperationError(errorMessage));
                   } else {
