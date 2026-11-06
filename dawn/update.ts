@@ -31,9 +31,15 @@ cpSync(join(unpacked, "lib/webgpu_dawn.lib"), join(libs, "webgpu_dawn.lib"))
 cpSync(join(unpacked, "include"), join(libs, "include"), { recursive: true })
 cpSync(join(unpacked, "include/dawn/webgpu.h"), join(here, "webgpu.h"))
 
-const json = await fetch(`https://raw.githubusercontent.com/google/dawn/${commit}/src/dawn/dawn.json`)
-if (!json.ok) throw new Error(`dawn.json at ${commit}: HTTP ${json.status}`)
-await Bun.write(join(here, "dawn.json"), await json.text())
+// dawn.json, and Dawn's license, which the wrapper links statically and the release archive lacks
+for (const [from, to] of [
+  ["src/dawn/dawn.json", join(here, "dawn.json")],
+  ["LICENSE", join(here, "../src/lib/x86_64-windows/dawn-LICENSE.txt")],
+]) {
+  const res = await fetch(`https://raw.githubusercontent.com/google/dawn/${commit}/${from}`)
+  if (!res.ok) throw new Error(`${from} at ${commit}: HTTP ${res.status}`)
+  await Bun.write(to, await res.text())
+}
 await Bun.write(join(here, "VERSION"), `${tag} ${commit}\n`)
 
 await $`bun ${join(here, "../scripts/enums.ts")}`
