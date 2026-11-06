@@ -15,8 +15,10 @@ const json = await Bun.file(join(root, "dawn/dawn.json")).json()
 const header = await Bun.file(join(root, "dawn/webgpu.h")).text()
 
 test("src/enums.ts is what scripts/enums.ts writes from dawn/dawn.json", async () => {
-  const version = (await Bun.file(join(root, "dawn/VERSION")).text()).split("\n")[0]!
-  expect(await Bun.file(join(import.meta.dir, "enums.ts")).text()).toBe(generate(json, version))
+  const version = (await Bun.file(join(root, "dawn/VERSION")).text()).split(/\r?\n/)[0]!
+  // a checkout may hold the file with CRLF endings
+  const file = (await Bun.file(join(import.meta.dir, "enums.ts")).text()).replaceAll("\r\n", "\n")
+  expect(file).toBe(generate(json, version))
 })
 
 test("every enum value is the number dawn/webgpu.h gives it, and none is missing", () => {

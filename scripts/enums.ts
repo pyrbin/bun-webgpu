@@ -97,7 +97,7 @@ export function generate(json: Record<string, Entry>, version: string): string {
 if (import.meta.main) {
   const root = join(import.meta.dir, "..")
   const json = await Bun.file(join(root, "dawn/dawn.json")).json()
-  const version = (await Bun.file(join(root, "dawn/VERSION")).text()).split("\n")[0]!
+  const version = (await Bun.file(join(root, "dawn/VERSION")).text()).split(/\r?\n/)[0]!
   await Bun.write(join(root, "src/enums.ts"), generate(json, version))
   console.log(`src/enums.ts: ${tables.length} enums from Dawn ${version}`)
 }
